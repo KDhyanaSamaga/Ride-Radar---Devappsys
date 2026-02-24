@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package location;
+
+// The request from Booking Service to Geo Service
+message FindNearestRequest {
+    float lat = 1;
+    float lng = 2;
+    float radius_km = 3;
+}
+
+// The response from Geo Service
+message DriverResponse {
+    string driver_id = 1;
+    float distance = 2;
+}
+
+service GeoService {
+    // The RPC call to find a driver
+    rpc FindNearestDriver(FindNearestRequest) returns (DriverResponse);
+}

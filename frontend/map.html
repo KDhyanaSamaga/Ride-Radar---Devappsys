@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>RideRadar | Live Fleet Dashboard</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+    <style>
+        body {
+            margin: 0;
+            font-family: 'Segoe UI', sans-serif;
+            overflow: hidden;
+            background: #0f172a;
+        }
+
+        #map {
+            height: 100vh;
+            width: 100%;
+            cursor: crosshair;
+        }
+
+        /* Premium Overlay Style */
+        .overlay {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 20px;
+            border-radius: 16px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            min-width: 280px;
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.4);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        /* History Panel */
+        #history-panel {
+            position: absolute;
+            top: 20px;
+            right: -400px;
+            z-index: 1001;
+            width: 350px;
+            height: calc(100vh - 40px);
+            background: rgba(255, 255, 255, 0.98);
+            border-radius: 16px;
+            box-shadow: -10px 0 40px rgba(0, 0, 0, 0.15);
+            transition: right 0.4s ease;
+            overflow-y: auto;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+        }
+
+        #history-panel.active {
+            right: 20px;
+        }
+
+        .history-item {
+            background: #fff;
+            padding: 15px;
+            border-radius: 12px;
+            margin-bottom: 12px;
+            border: 1px solid #e2e8f0;
+            transition: transform 0.2s;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        }
+
+        .history-item:hover {
+            transform: scale(1.02);
+            border-color: #3b82f6;
+        }
+
+        .history-item .date {
+            font-size: 0.75em;
+            color: #94a3b8;
+            margin-bottom: 5px;
+        }
+
+        .history-item .fare {
+            float: right;
+            font-weight: bold;
+            color: #059669;
+            font-size: 1.1em;
+        }
+
+        .status-dot {
+            height: 10px;
+            width: 10px;
+            background-color: #2ecc71;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 8px;
+        }
+
+        .legend {
+            font-size: 0.8em;
+            margin-top: 15px;
+            color: #666;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .custom-div-icon {
+            background: none;
+            border: none;
+        }
+
+        button {
+            width: 100%;
+            padding: 12px;
+            margin-top: 10px;
+            border: none;
+            border-radius: 8px;
+            background: #2563eb;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        button:hover {
+            background: #1d4ed8;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+        }
+
+        button:disabled {
+            background: #94a3b8;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        #trip-info {
+            margin-top: 10px;
+            padding: 15px;
+            background: #eff6ff;
+            border-radius: 10px;
+            display: none;
+            border: 1px solid #bfdbfe;
+        }
+
+        .fare-badge {
+            font-size: 1.25em;
+            color: #059669;
+            font-weight: 800;
+        }
+
+        .instruction {
+            font-size: 0.85em;
+            color: #1e293b;
+            background: #f1f5f9;
+            padding: 10px;
+            border-radius: 8px;
+            margin-top: 10px;
+            border-left: 4px solid #3b82f6;
+        }
+
+        #history-toggle {
+            background: #64748b;
+            margin-top: 15px;
+        }
+
+        #history-toggle:hover {
+            background: #475569;
+        }
+
+        .close-history {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            cursor: pointer;
+            font-size: 1.5em;
+            color: #64748b;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="overlay" id="main-overlay">
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+            <div style="display: flex; align-items: center;">
+                <span class="status-dot" id="socket-dot"></span>
+                <h3 style="margin: 0; color: #1e293b;">RideRadar</h3>
+            </div>
+            <span id="fleet-count" style="font-size: 0.85em; color: #64748b; font-weight: 600;">0 Drivers</span>
+        </div>
+
+        <div id="user-location-info" style="margin-top: 18px; font-size: 0.9em; color: #475569;">
+            📍 <span id="location-text">Detecting your location...</span>
+        </div>
+
+        <div id="dest-instruction" class="instruction">
+            👉 <b>Click on the map</b> to set your destination.
+        </div>
+
+        <button id="request-btn" disabled>🚀 Request Ride</button>
+
+        <div id="trip-info">
+            <div style="font-size: 0.8em; color: #64748b; margin-bottom: 4px;">Current Ride</div>
+            <div id="trip-status" style="font-weight: 700; color: #2563eb; font-size: 1.1em;">Searching...</div>
+            <div id="trip-details"
+                style="margin-top: 8px; font-size: 0.9em; background: white; padding: 8px; border-radius: 6px;"></div>
+            <button id="start-btn" style="background: #059669; display: none; margin-top: 12px;">✅ Start Trip</button>
+            <button id="end-btn" style="background: #dc2626; display: none; margin-top: 12px;">🛑 End Trip</button>
+        </div>
+
+        <button id="history-toggle">🕒 Trip History</button>
+
+        <div class="legend">
+            <span>🟢 Available</span>
+            <span>🟠 Pick-up</span>
+            <span>🔴 On Trip</span>
+        </div>
+    </div>
+
+    <!-- History Panel -->
+    <div id="history-panel">
+        <span class="close-history" onclick="toggleHistory()">&times;</span>
+        <h3 style="color: #1e293b; margin-top: 0;">Your Trips</h3>
+        <div id="history-list">
+            <div style="color: #94a3b8; text-align: center; margin-top: 40px;">No trips found yet.</div>
+        </div>
+    </div>
+
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        const map = L.map('map', { doubleClickZoom: false }).setView([12.91, 74.85], 13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        const driverMarkers = {};
+        const riderMarker = L.marker([12.91, 74.85], {
+            icon: L.icon({
+                iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png',
+                shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+                iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
+            })
+        }).addTo(map).bindPopup("Your Location");
+
+        const destMarker = L.marker([0, 0], {
+            icon: L.icon({
+                iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
+                shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+                iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
+            })
+        });
+
+        let userLat = 12.91;
+        let userLng = 74.85;
+        let destLat = null, destLng = null;
+        let pickupPath = null, tripPath = null, routeGlow = null;
+        let currentTripId = null;
+        const currentUserId = "demo_user_" + Math.floor(Math.random() * 9000 + 1000);
+
+        // 1. GET USER LOCATION
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition((position) => {
+                userLat = position.coords.latitude;
+                userLng = position.coords.longitude;
+                riderMarker.setLatLng([userLat, userLng]);
+                map.setView([userLat, userLng], 14);
+                document.getElementById('location-text').innerText = "Pick-up point set";
+            });
+        }
+
+        // 2. SET DESTINATION
+        map.on('click', (e) => {
+            if (currentTripId) return;
+            destLat = e.latlng.lat;
+            destLng = e.latlng.lng;
+            destMarker.setLatLng([destLat, destLng]).addTo(map).bindPopup("Drop-off Point").openPopup();
+            document.getElementById('dest-instruction').innerHTML = "🏁 Destination Set!";
+            document.getElementById('dest-instruction').style.background = "#dcfce7";
+            document.getElementById('dest-instruction').style.borderColor = "#22c55e";
+            document.getElementById('request-btn').disabled = false;
+            if (pickupPath) map.removeLayer(pickupPath);
+            if (tripPath) map.removeLayer(tripPath);
+            if (routeGlow) map.removeLayer(routeGlow);
+        });
+
+        function getIcon(status) {
+            let color = "#2ecc71"; // IDLE
+            if (status === "PICKING_UP") color = "#f39c12"; // Orange
+            if (status === "ON_TRIP") color = "#e74c3c";   // Red
+            return L.divIcon({
+                className: 'custom-div-icon',
+                html: `<div style="background-color:${color}; width:18px; height:18px; border-radius:50%; border:3px solid white; box-shadow: 0 4px 12px rgba(0,0,0,0.4);"></div>`,
+                iconSize: [18, 18], iconAnchor: [9, 9]
+            });
+        }
+
+        const ws = new WebSocket("ws://localhost:8000/geo/ws/map");
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            if (data.type === "LOCATION") {
+                const { driver_id, lat, lng, status, arrived } = data;
+                if (driverMarkers[driver_id]) {
+                    driverMarkers[driver_id].setLatLng([lat, lng]);
+                    driverMarkers[driver_id].setIcon(getIcon(status));
+                } else {
+                    driverMarkers[driver_id] = L.marker([lat, lng], { icon: getIcon(status || "IDLE") })
+                        .addTo(map).bindPopup(`<b>Driver: ${driver_id}</b>`);
+                }
+                if (arrived && currentTripId) {
+                    document.getElementById('trip-status').innerHTML = "✨ Driver Arrived!";
+                    const startBtn = document.getElementById('start-btn');
+                    startBtn.innerText = "Pick up User";
+                    startBtn.disabled = false;
+                    startBtn.style.background = "#059669";
+                }
+                document.getElementById('fleet-count').innerText = `${Object.keys(driverMarkers).length} Drivers Online`;
+            }
+
+            if (data.type === "MATCH_MADE") {
+                const { pickup_route, trip_route } = data;
+                if (pickupPath) map.removeLayer(pickupPath);
+                if (tripPath) map.removeLayer(tripPath);
+                if (routeGlow) map.removeLayer(routeGlow);
+
+                if (pickup_route) {
+                    pickupPath = L.polyline(pickup_route, { color: '#4285F4', weight: 4, dashArray: '10, 10', opacity: 0.6 }).addTo(map);
+                }
+                if (trip_route) {
+                    routeGlow = L.polyline(trip_route, { color: '#1A73E8', weight: 10, opacity: 0.2 }).addTo(map);
+                    tripPath = L.polyline(trip_route, { color: '#4285F4', weight: 6, opacity: 0.9 }).addTo(map);
+                    map.fitBounds(L.featureGroup([pickupPath, tripPath, riderMarker, destMarker]).getBounds(), { padding: [50, 50] });
+                }
+                document.getElementById('trip-status').innerText = "Driver is coming...";
+                document.getElementById('start-btn').style.display = 'block';
+                document.getElementById('start-btn').disabled = true;
+                document.getElementById('start-btn').innerText = "Waiting for arrival...";
+                document.getElementById('start-btn').style.background = "#94a3b8";
+            }
+        };
+
+        document.getElementById('request-btn').onclick = async () => {
+            document.getElementById('request-btn').disabled = true;
+            document.getElementById('trip-info').style.display = 'block';
+            const payload = {
+                user_id: currentUserId,
+                source: { type: "Point", coordinates: [userLng, userLat] },
+                destination: { type: "Point", coordinates: [destLng, destLat] },
+                vehicle_type: "Car"
+            };
+            try {
+                const res = await fetch("http://localhost:8000/trip/create", {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    currentTripId = data.trip_id;
+                    document.getElementById('trip-details').innerHTML = `<b>Distance:</b> ${data.distance_km} km<br><b>Fare:</b> <span class="fare-badge">₹${data.fare}</span>`;
+                } else {
+                    alert(data.detail);
+                    document.getElementById('request-btn').disabled = false;
+                }
+            } catch (err) { alert("Backend error"); document.getElementById('request-btn').disabled = false; }
+        };
+
+        document.getElementById('start-btn').onclick = async () => {
+            const res = await fetch(`http://localhost:8000/trip/${currentTripId}/start`, { method: 'PUT' });
+            if (res.ok) {
+                document.getElementById('trip-status').innerText = "On Trip...";
+                document.getElementById('start-btn').style.display = 'none';
+                document.getElementById('end-btn').style.display = 'block';
+                if (pickupPath) map.removeLayer(pickupPath);
+                if (tripPath) tripPath.setStyle({ opacity: 1.0 });
+            }
+        };
+
+        document.getElementById('end-btn').onclick = async () => {
+            const res = await fetch(`http://localhost:8000/trip/${currentTripId}/end?status=Completed`, { method: 'PUT' });
+            if (res.ok) {
+                document.getElementById('trip-status').innerText = "Dropped Off! 🏁";
+                document.getElementById('end-btn').style.display = 'none';
+                setTimeout(() => {
+                    document.getElementById('trip-info').style.display = 'none';
+                    document.getElementById('request-btn').disabled = true;
+                    document.getElementById('dest-instruction').innerHTML = "👉 <b>Click on the map</b> to set your destination.";
+                    document.getElementById('dest-instruction').style.background = "#f1f5f9";
+                    document.getElementById('dest-instruction').style.borderColor = "#cbd5e1";
+                    if (tripPath) map.removeLayer(tripPath);
+                    if (routeGlow) map.removeLayer(routeGlow);
+                    if (destMarker) map.removeLayer(destMarker);
+                    currentTripId = null;
+                }, 3000);
+            }
+        };
+
+        // HISTORY LOGIC
+        async function toggleHistory() {
+            const panel = document.getElementById('history-panel');
+            panel.classList.toggle('active');
+            if (panel.classList.contains('active')) {
+                const list = document.getElementById('history-list');
+                list.innerHTML = '<div style="text-align:center; padding:20px;">Loading...</div>';
+                try {
+                    const res = await fetch(`http://localhost:8000/trip/history/user/${currentUserId}`);
+                    const data = await res.json();
+                    if (data.history && data.history.length > 0) {
+                        list.innerHTML = data.history.reverse().map(trip => `
+                            <div class="history-item">
+                                <span class="fare">₹${trip.fare}</span>
+                                <div class="date">${new Date(trip.created_at).toLocaleString()}</div>
+                                <div style="font-size:0.9em; font-weight:600; color:#1e293b;">
+                                    ID: ...${trip._id.slice(-6)}
+                                </div>
+                                <div style="font-size:0.8em; color:#64748b; margin-top:4px;">
+                                    Distance: ${trip.distance_km} km
+                                </div>
+                            </div>
+                        `).join('');
+                    } else {
+                        list.innerHTML = '<div style="color: #94a3b8; text-align: center; margin-top: 40px;">No trips found.</div>';
+                    }
+                } catch (e) {
+                    list.innerHTML = '<div style="color: #ef4444; text-align: center; margin-top: 40px;">Failed to load history.</div>';
+                }
+            }
+        }
+        document.getElementById('history-toggle').onclick = toggleHistory;
+    </script>
+</body>
+
+</html>

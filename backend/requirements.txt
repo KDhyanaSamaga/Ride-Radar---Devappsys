@@ -1,0 +1,9 @@
+pymongo
+fastapi
+cerberus 
+passlib[bcrypt]
+redis 
+websockets
+grpcio 
+grpcio-tools
+httpx
